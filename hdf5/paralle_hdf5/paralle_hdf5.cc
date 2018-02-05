@@ -3,7 +3,7 @@
 // Author: Chuncheng Wei
 // Mail: weicc1989@gmail.com
 // Created Time : Sun 04 Feb 2018 09:47:16 PM CST
-// Last Modified: Mon 05 Feb 2018 01:54:59 PM CST
+// Last Modified: Mon 05 Feb 2018 05:30:30 PM CST
 //******************************************************************************
 
 #include <iostream>
@@ -12,6 +12,7 @@
 #define RANK 2
 
 using std::string;
+using std::vector;
 using std::cout;
 using std::endl;
 
@@ -255,4 +256,94 @@ void h5_append_data(string fname, string dname,
 	H5Sclose(filespace);
 	H5Dclose(dset_id);
 	H5Fclose(file_id);
+}
+
+void h5_loop_run(string pfname, string pdname, string ofname, string odname,
+    void (*f)(double *Para, int n_par, double *Result, void *),
+    vector<double> &Ekin, int minibatch, void *context) {
+
+  /******************************************************************
+   * h5 file contain parameter matrix
+   *    pfname: h5 file name
+   *    pdname: dataset name
+   *
+   * h5 file save output
+   *    ofname: h5 file name
+   *    odname: dataset name
+   *
+   * void f(Para, n_par, Result, void*)
+   *    Para:    parameter array pointer
+   *    n_par:   parameter size
+   *    Result:  save output
+   *    context: any additional information user wants to pass
+   *
+   * Ekin:
+   *
+   * minibatch: each process save output to h5 file, after
+   *            dealling minibatch rows of parameter.
+   *
+   * MPI: mpi_size, mpi_rank.
+   ******************************************************************/
+
+
+
+  /*****************
+   * MPI variables *
+   *****************/
+  int mpi_size, mpi_rank;
+  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+
+
+  /******************************************************************
+   * parameter loading ...
+   ******************************************************************/
+  double * para;
+  hsize_t pdims[RANK];  // dimensions in current process
+  hsize_t pdimsf[RANK]; // dimensions in file
+
+  h5_load_data(pfname, pdname, para, pdims, pdimsf);
+
+  /******************************************************************
+   * creat output file, and save Ekin
+   ******************************************************************/
+  h5_creat_file(ofname, odname, Ekin.data(), Ekin.size());
+
+  /******************************************************************
+   * looping ...
+   * append output to dataset in output file, after dealling
+   * minibatch rows of parameter.
+   ******************************************************************/
+  int payload_remain = pdims[0];  // for current process
+
+  while (payload_remain) {
+
+    // set n_payload, ntot_payload
+    int n_payload;                // current process
+    int ntot_payload;             // total process
+    if (payload_remain < minibatch) {
+      n_payload       = payload_remain;
+      ntot_payload    = pdimsf[0] % (mpi_size * minibatch);
+      payload_remain  = 0;
+    } else {
+      n_payload       = minibatch;
+      ntot_payload    = mpi_size * minibatch;
+      payload_remain -= minibatch;
+    }
+
+    // calculate output
+    hsize_t odims[RANK] = {n_payload, Ekin.size()};
+    double output[odims[0] * odims[1]];
+    for (int i=0; i<n_payload; i++) {
+      int  row_in_p = i + pdims[0] - payload_remain - n_payload;
+      double * pacr = para   + row_in_p * pdims[1];   // pointer to current para row
+      double * opcr = output +        i * odims[1];   // pointer to current output row
+      f(pacr, pdims[1], opcr, context);
+    }
+
+    /****************************************************************
+     * append output to file
+     ****************************************************************/
+    h5_append_data(ofname, odname, output, odims, ntot_payload);
+  }
 }
