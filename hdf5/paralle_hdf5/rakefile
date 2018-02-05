@@ -1,0 +1,53 @@
+require 'rake/clean'
+require 'fileutils'
+
+def sys(str)
+  puts str
+  system(str)
+end
+
+CC = 'g++'
+CFLAG = '-std=c++0x -O2 -shared -fPIC '
+PREFIX = '/home/weicc/WEICC/opt/paralle_hdf5'
+
+
+
+
+# MPI + HDF5 set
+MPI_INC = "-I/usr/include/mpich-x86_64/"
+
+# total
+TOTAL_INC   = [MPI_INC].join(' ')
+TOTAL_HEADS = ['paralle_hdf5.h']
+TOTAL_OBJS  = ['paralle_hdf5.o']
+
+# task clean
+CLEAN.include(TOTAL_OBJS)
+CLEAN.include('libparalle_hdf5.so')
+
+# task default
+task :default =>[ :paralle_hdf5 ]
+
+# task paralle_hdf5
+desc "Compiling the paralle_hdf5 library"
+multitask paralle_hdf5: TOTAL_OBJS do |t|
+  sys([CC, CFLAG, '-o', "lib#{t.name}.so", t.sources].join(' '))
+end
+
+# task install
+desc "Installing the paralle_hdf5"
+task :install => :paralle_hdf5 do |t|
+
+  # creat PREFIX folder
+  inc     = "#{PREFIX}/include"
+  lib     = "#{PREFIX}/lib"
+  [inc, lib].map { |x| sys("install -d #{x}") }
+
+  # install
+  sys("install -C #{TOTAL_HEADS.join(' ')} #{inc}")
+  sys("install -C lib#{t.source}.so #{lib}")
+end
+
+rule '.o' => '.cc' do |t|
+  sys([CC, CFLAG, '-c -o', t.name, TOTAL_INC, t.source].join(' '))
+end
