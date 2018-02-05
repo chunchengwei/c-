@@ -3,7 +3,7 @@
 // Author: Chuncheng Wei
 // Mail: weicc1989@gmail.com
 // Created Time : Sun 04 Feb 2018 09:47:22 PM CST
-// Last Modified: Mon 05 Feb 2018 05:13:08 PM CST
+// Last Modified: Mon 05 Feb 2018 09:00:16 PM CST
 //******************************************************************************
 
 #ifndef _PARALLE_HDF5_H
@@ -19,6 +19,9 @@
  * current process:
  *    rdata []:     save data for each process.
  *    rcount[RANK]: dimensions of rdata.
+ *
+ *    ps. remember release resource when not use rdata.
+ *        (delete[] rdata;)
  *
  * all process:
  *    dims  [RANK]: dimensions of data in file.

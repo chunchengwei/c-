@@ -3,7 +3,7 @@
 // Author: Chuncheng Wei
 // Mail: weicc1989@gmail.com
 // Created Time : Sun 04 Feb 2018 09:47:16 PM CST
-// Last Modified: Mon 05 Feb 2018 05:30:30 PM CST
+// Last Modified: Mon 05 Feb 2018 08:59:43 PM CST
 //******************************************************************************
 
 #include <iostream>
@@ -26,6 +26,9 @@ void h5_load_data(string fname, string dname,
    * current process:
    *    rdata []:     save data for each process.
    *    rcount[RANK]: dimensions of rdata.
+   *
+   *    ps. remember release resource when not use rdata.
+   *        (delete[] rdata;)
    *
    * all process:
    *    dims  [RANK]: dimensions of data in file.
@@ -346,4 +349,7 @@ void h5_loop_run(string pfname, string pdname, string ofname, string odname,
      ****************************************************************/
     h5_append_data(ofname, odname, output, odims, ntot_payload);
   }
+
+  // free para
+  delete[] para;
 }
