@@ -3,7 +3,7 @@
 // Author: Chuncheng Wei
 // Mail: weicc1989@gmail.com
 // Created Time : Sun 04 Feb 2018 09:47:22 PM CST
-// Last Modified: Mon 05 Feb 2018 09:00:16 PM CST
+// Last Modified: Mon 05 Feb 2018 11:09:15 PM CST
 //******************************************************************************
 
 #ifndef _PARALLE_HDF5_H
@@ -11,6 +11,7 @@
 
 #include "hdf5.h"
 #include <vector>
+#include <string>
 
 
 /******************************************************************
