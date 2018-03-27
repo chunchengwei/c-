@@ -3,7 +3,7 @@
 // Author: Chuncheng Wei
 // Mail: weicc1989@gmail.com
 // Created Time : Sun 04 Feb 2018 09:47:16 PM CST
-// Last Modified: Mon 05 Feb 2018 08:59:43 PM CST
+// Last Modified: Tue 27 Mar 2018 10:56:59 AM CST
 //******************************************************************************
 
 #include <iostream>
@@ -17,26 +17,8 @@ using std::cout;
 using std::endl;
 
 
-void h5_load_data(string fname, string dname,
-    double*& rdata, hsize_t *rcount, hsize_t *dims) {
-
-  /******************************************************************
-   * load data from h5 file.
-   *
-   * current process:
-   *    rdata []:     save data for each process.
-   *    rcount[RANK]: dimensions of rdata.
-   *
-   *    ps. remember release resource when not use rdata.
-   *        (delete[] rdata;)
-   *
-   * all process:
-   *    dims  [RANK]: dimensions of data in file.
-   *
-   * MPI: mpi_size, mpi_rank.
-   ******************************************************************/
-
-
+void h5_load_param(string fname, string dname,
+    double*& data_CP, int *dims_CP, int *dims_TP) {
 
   /*****************
    * MPI variables *
@@ -70,6 +52,7 @@ void h5_load_data(string fname, string dname,
     cout << "ERROR: only deal RANK=2 dataset" << endl;
     return;
   }
+  hsize_t	dims[RANK];
   H5Sget_simple_extent_dims(filespace, dims, NULL);
 
   /*
@@ -78,8 +61,7 @@ void h5_load_data(string fname, string dname,
    */
   hsize_t	offset[RANK] = {mpi_rank, 0};
   hsize_t	stride[RANK] = {mpi_size, 1};
-  rcount[0] = dims[0] / mpi_size;
-  rcount[1] = dims[1];
+  hsize_t	rcount[RANK] = {dims[0] / mpi_size, dims[1]};
 
   if (mpi_rank < dims[0] % mpi_size) rcount[0] += 1;
 
@@ -90,9 +72,14 @@ void h5_load_data(string fname, string dname,
   H5Sselect_hyperslab(filespace, H5S_SELECT_SET, offset, stride, rcount, NULL);
 
   // read data
-  rdata = new double[rcount[0] * rcount[1]];
+  data_CP = new double[rcount[0] * rcount[1]];
+  H5Dread(dset_id, H5T_NATIVE_DOUBLE, memspace, filespace, H5P_DEFAULT, data_CP);
 
-  H5Dread(dset_id, H5T_NATIVE_DOUBLE, memspace, filespace, H5P_DEFAULT, rdata);
+  // set dims_XX
+  dims_CP[0] = rcount[0];
+  dims_CP[1] = rcount[1];
+  dims_TP[0] = dims[0];
+  dims_TP[1] = dims[1];
 
   // close
   H5Sclose(memspace);
@@ -101,21 +88,9 @@ void h5_load_data(string fname, string dname,
   H5Fclose(file_id);
 }
 
-void h5_creat_file(string fname, string dname,
-    double *ene, int n_col) {
-
-  /******************************************************************
-   * creat h5 file with unlimit dataset
-   * file name:     fname
-   *
-   * dataset name:  dname
-   * dataset shape: [H5S_UNLIMITED, n_col]
-   *
-   * dataset name:  "Ekin"
-   * dataset shape: [1,             n_col]
-   ******************************************************************/
-
-
+void h5_creat_file(string fname,
+    const vector<std::string> & dname, double * data[], const int * n_col,
+    const vector<std::string> & ext_dname, const int * ext_n_col) {
 
   /*****************
    * MPI variables *
@@ -123,6 +98,10 @@ void h5_creat_file(string fname, string dname,
   int mpi_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
+
+  /******************************************************************
+   * h5 file creating ...
+   ******************************************************************/
 
   // Set up file access property list with parallel I/O access.
   hid_t plist_id = H5Pcreate(H5P_FILE_ACCESS);
@@ -132,67 +111,69 @@ void h5_creat_file(string fname, string dname,
   hid_t file_id = H5Fcreate(fname.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, plist_id);
   H5Pclose(plist_id);
 
+  /***********************
+   * dataset writing ...
+   ***********************/
+  int nd = dname.size();
+  hsize_t dims[RANK] = {1};
 
-  /*
-   * Create the dataspace with unlimited dimensions.
-   */
-  hsize_t dims[RANK]       = {0,             n_col};
-  hsize_t maxdims[RANK]    = {H5S_UNLIMITED, n_col};
-  hsize_t chunk_dims[RANK] = {1,             n_col};
+  for (int i = 0; i < nd; i++) {
 
-  hid_t filespace = H5Screate_simple (RANK, dims, maxdims);
+    // creat dataspace
+    dims[1] = n_col[i];
+    hid_t filespace = H5Screate_simple (RANK, dims, NULL);
 
-  // set chunk to dataset creat property list.
-  plist_id = H5Pcreate(H5P_DATASET_CREATE);
-  H5Pset_chunk(plist_id, RANK, chunk_dims);
+    // creat dataset
+    hid_t dset_id = H5Dcreate(file_id, dname[i].c_str(), H5T_NATIVE_DOUBLE, filespace,
+        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
-  // creat dataset
-  hid_t dset_id = H5Dcreate(file_id, dname.c_str(), H5T_NATIVE_DOUBLE, filespace,
-      H5P_DEFAULT, plist_id, H5P_DEFAULT);
-  H5Pclose(plist_id);
+    // write dataset
+    if (mpi_rank == 0)
+      H5Dwrite(dset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
+          H5P_DEFAULT, data[i]);
+
+    // close
+    H5Sclose(filespace);
+    H5Dclose(dset_id);
+  }
+
+  /**************************
+   * ext_dataset writing ...
+   **************************/
+  nd = ext_dname.size();
+  dims[0] = 0;
+  hsize_t maxdims[RANK] = {H5S_UNLIMITED};
+  hsize_t chunk_dims[RANK] = {1};
+
+  for (int i = 0; i < nd; i++) {
+
+    // creat dataspace with unlimited dimensions.
+    dims[1] = ext_n_col[i];
+    maxdims[1] = ext_n_col[i];
+    chunk_dims[1] = ext_n_col[i];
+    hid_t filespace = H5Screate_simple (RANK, dims, maxdims);
+
+    // set chunk to dataset creat property list.
+    plist_id = H5Pcreate(H5P_DATASET_CREATE);
+    H5Pset_chunk(plist_id, RANK, chunk_dims);
+
+    // creat dataset
+    hid_t dset_id = H5Dcreate(file_id, ext_dname[i].c_str(), H5T_NATIVE_DOUBLE, filespace,
+        H5P_DEFAULT, plist_id, H5P_DEFAULT);
+
+    // close
+    H5Pclose(plist_id);
+    H5Sclose(filespace);
+    H5Dclose(dset_id);
+  }
 
   // close
-  H5Sclose(filespace);
-  H5Dclose(dset_id);
-
-
-  /*
-   * Create the "Ekin" dataspace.
-   */
-  dims[0] = 1;
-  filespace = H5Screate_simple (RANK, dims, NULL);
-
-  // creat dataset
-  dset_id = H5Dcreate(file_id, "Ekin", H5T_NATIVE_DOUBLE, filespace,
-      H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-  H5Sclose(filespace);
-
-  // write dataset
-  if (mpi_rank == 0)
-    H5Dwrite(dset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
-        H5P_DEFAULT, ene);
-
-  // close
-  H5Dclose(dset_id);
   H5Fclose(file_id);
 }
 
-void h5_append_data(string fname, string dname,
-    double *data, hsize_t *count, int ntot_row) {
-
-  /******************************************************************
-   * append data to h5 file.
-   *
-   * current process:
-   *    data[]:      raw data (length = count[0] * count[1]).
-   *    count[RANK]: elements to be write in each dimension.
-   *
-   * all process:
-   *    ntot_row:    total rows to be append by all process
-   *
-   * MPI: mpi_size, mpi_rank.
-   ******************************************************************/
-
+void h5_append_ext_data(string fname,
+    const vector<string> & dname, double * data[], const int * n_col,
+    int n_row_CP, int n_row_TP) {
 
 
   /*****************
@@ -215,80 +196,81 @@ void h5_append_data(string fname, string dname,
   hid_t file_id = H5Fopen(fname.c_str(), H5F_ACC_RDWR, plist_id);
   H5Pclose(plist_id);
 
-  // open dataset
-  hid_t dset_id = H5Dopen(file_id, dname.c_str(), H5P_DEFAULT);
+  /***********************
+   * dataset writing ...
+   ***********************/
+  int nd = dname.size();
 
-  // get dataspace
-  hid_t filespace = H5Dget_space(dset_id);
+  for (int i = 0; i < nd; i++) {
 
-  // get dataset dimensions
-  hsize_t old_dimsf[RANK];
-	H5Sget_simple_extent_dims(filespace, old_dimsf, NULL);
-	H5Sclose(filespace);
+    // open dataset
+    hid_t dset_id = H5Dopen(file_id, dname[i].c_str(), H5P_DEFAULT);
 
-  // extend dataset
-	hsize_t new_dimsf[RANK] = {old_dimsf[0] + ntot_row, old_dimsf[1]};
-	H5Dset_extent(dset_id, new_dimsf);
+    // get dataspace
+    hid_t filespace = H5Dget_space(dset_id);
 
-  /*
-	 * Select a hyperslab in extended portion of dataset.
-   */
-  hsize_t	offset[RANK] = {mpi_rank + old_dimsf[0], 0};
-  hsize_t	stride[RANK] = {mpi_size, 1};
+    // get dataset dimensions
+    hsize_t old_dimsf[RANK];
+	  H5Sget_simple_extent_dims(filespace, old_dimsf, NULL);
+	  H5Sclose(filespace);
 
-  // creat memspace
-  hid_t memspace = H5Screate_simple(RANK, count, NULL);
+    // extend dataset
+	  hsize_t new_dimsf[RANK] = {old_dimsf[0] + n_row_TP, old_dimsf[1]};
+	  H5Dset_extent(dset_id, new_dimsf);
 
-  // get dataspace
-  filespace = H5Dget_space(dset_id);
+    /*
+	   * Select a hyperslab in extended portion of dataset.
+     */
+    hsize_t	offset[RANK] = {mpi_rank + old_dimsf[0], 0};
+    hsize_t	stride[RANK] = {mpi_size, 1};
+    hsize_t	count[RANK]  = {n_row_CP, n_col[i]};
 
-  // select_hyperslab
-	H5Sselect_hyperslab(filespace, H5S_SELECT_SET, offset, stride, count, NULL);
+    // get dataspace
+    filespace = H5Dget_space(dset_id);
 
-	// Create property list for collective dataset write.
-	plist_id = H5Pcreate(H5P_DATASET_XFER);
-	H5Pset_dxpl_mpio(plist_id, H5FD_MPIO_COLLECTIVE);
+	  // Create property list for collective dataset write.
+	  plist_id = H5Pcreate(H5P_DATASET_XFER);
+	  H5Pset_dxpl_mpio(plist_id, H5FD_MPIO_COLLECTIVE);
 
-  // write data
-	H5Dwrite(dset_id, H5T_NATIVE_DOUBLE, memspace, filespace,
-      plist_id, data);
-	H5Pclose(plist_id);
+    if (n_row_CP > 0) {
+
+      // creat memspace
+      hid_t memspace = H5Screate_simple(RANK, count, NULL);
+
+      // select_hyperslab
+	    H5Sselect_hyperslab(filespace, H5S_SELECT_SET, offset, stride, count, NULL);
+
+      // write data[i]
+	    H5Dwrite(dset_id, H5T_NATIVE_DOUBLE, memspace, filespace, plist_id, data[i]);
+
+      // close
+	    H5Sclose(memspace);
+
+    } else {
+
+      // select_hyperslab
+      H5Sselect_none(filespace);
+
+      // write data[i]
+	    H5Dwrite(dset_id, H5T_NATIVE_DOUBLE, H5S_ALL, filespace, plist_id, data[i]);
+    }
+
+    // close
+	  H5Pclose(plist_id);
+	  H5Sclose(filespace);
+	  H5Dclose(dset_id);
+  }
 
   // close
-	H5Sclose(memspace);
-	H5Sclose(filespace);
-	H5Dclose(dset_id);
 	H5Fclose(file_id);
 }
 
-void h5_loop_run(string pfname, string pdname, string ofname, string odname,
-    void (*f)(double *Para, int n_par, double *Result, void *),
-    vector<double> &Ekin, int minibatch, void *context) {
-
-  /******************************************************************
-   * h5 file contain parameter matrix
-   *    pfname: h5 file name
-   *    pdname: dataset name
-   *
-   * h5 file save output
-   *    ofname: h5 file name
-   *    odname: dataset name
-   *
-   * void f(Para, n_par, Result, void*)
-   *    Para:    parameter array pointer
-   *    n_par:   parameter size
-   *    Result:  save output
-   *    context: any additional information user wants to pass
-   *
-   * Ekin:
-   *
-   * minibatch: each process save output to h5 file, after
-   *            dealling minibatch rows of parameter.
-   *
-   * MPI: mpi_size, mpi_rank.
-   ******************************************************************/
-
-
+void h5_loop_run(
+    std::string pfname, std::string pdname, std::string fname,
+    const std::vector<std::string> & dname, double * data[], const int * n_col,
+    const std::vector<std::string> & ext_dname, const int * ext_n_col,
+    void (*f)(double *Para, int n_par, double * Result[], void *),
+    int minibatch, void *context) {
 
   /*****************
    * MPI variables *
@@ -302,52 +284,73 @@ void h5_loop_run(string pfname, string pdname, string ofname, string odname,
    * parameter loading ...
    ******************************************************************/
   double * para;
-  hsize_t pdims[RANK];  // dimensions in current process
-  hsize_t pdimsf[RANK]; // dimensions in file
+  int pdims[RANK];  // dimensions in current process
+  int pdimsf[RANK]; // dimensions in file
 
-  h5_load_data(pfname, pdname, para, pdims, pdimsf);
+  h5_load_param(pfname, pdname, para, pdims, pdimsf);
 
   /******************************************************************
    * creat output file, and save Ekin
    ******************************************************************/
-  h5_creat_file(ofname, odname, Ekin.data(), Ekin.size());
+  h5_creat_file(fname, dname, data, n_col, ext_dname, ext_n_col);
 
   /******************************************************************
    * looping ...
-   * append output to dataset in output file, after dealling
+   * append ext_data to ext_dataset in output file, after dealling
    * minibatch rows of parameter.
    ******************************************************************/
-  int payload_remain = pdims[0];  // for current process
+  int payload_remain_CP = pdims[0];   // for current process
+  int payload_remain_TP = pdimsf[0];  // for total process
 
-  while (payload_remain) {
+  while (payload_remain_TP) {
 
-    // set n_payload, ntot_payload
-    int n_payload;                // current process
-    int ntot_payload;             // total process
-    if (payload_remain < minibatch) {
-      n_payload       = payload_remain;
-      ntot_payload    = pdimsf[0] % (mpi_size * minibatch);
-      payload_remain  = 0;
+    // set payload_CP, payload_TP, which represent payloads in this epochs.
+    int payload_CP;
+    int payload_TP;
+
+    if (payload_remain_CP < minibatch) {
+      payload_CP        = payload_remain_CP;
+      payload_TP        = pdimsf[0] % (mpi_size * minibatch);
     } else {
-      n_payload       = minibatch;
-      ntot_payload    = mpi_size * minibatch;
-      payload_remain -= minibatch;
+      payload_CP         = minibatch;
+      payload_TP         = mpi_size * minibatch;
     }
 
-    // calculate output
-    hsize_t odims[RANK] = {n_payload, Ekin.size()};
-    double output[odims[0] * odims[1]];
-    for (int i=0; i<n_payload; i++) {
-      int  row_in_p = i + pdims[0] - payload_remain - n_payload;
-      double * pacr = para   + row_in_p * pdims[1];   // pointer to current para row
-      double * opcr = output +        i * odims[1];   // pointer to current output row
-      f(pacr, pdims[1], opcr, context);
+    /*********************
+     * calculate ext_data
+     *********************/
+    int nd = ext_dname.size();
+    double * ext_data[nd];
+    for (int i = 0; i < nd; i++)
+      ext_data[i] = new double[payload_CP * ext_n_col[i]];
+
+    for (int j = 0; j < payload_CP; j++) {
+
+      // pacr: pointer to current para row
+      int  row_in_p = j + pdims[0] - payload_remain_CP;
+      double * pacr = para + row_in_p * pdims[1];
+
+      // edcr[i] pointer to current ext_data[i] row
+      double * edcr[nd];
+      for (int i = 0; i < nd; i++)
+        edcr[i] = ext_data[i] + j * ext_n_col[i];
+
+      // run f()
+      f(pacr, pdims[1], edcr, context);
     }
 
     /****************************************************************
-     * append output to file
+     * append ext_data to file
      ****************************************************************/
-    h5_append_data(ofname, odname, output, odims, ntot_payload);
+    h5_append_ext_data(fname, ext_dname, ext_data, ext_n_col, payload_CP, payload_TP);
+
+    // free ext_data
+    for (int i = 0; i < nd; i++)
+      delete[] ext_data[i];
+
+    // update payload_remain_XX
+    payload_remain_CP -= payload_CP;
+    payload_remain_TP -= payload_TP;
   }
 
   // free para
