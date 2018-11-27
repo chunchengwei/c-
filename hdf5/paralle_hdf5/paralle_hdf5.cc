@@ -3,7 +3,7 @@
 // Author: Chuncheng Wei
 // Mail: weicc1989@gmail.com
 // Created Time : Sun 04 Feb 2018 09:47:16 PM CST
-// Last Modified: Wed Nov 28 01:17:50 2018
+// Last Modified: Wed Nov 28 02:13:45 2018
 //******************************************************************************
 
 #include <iostream>
@@ -305,6 +305,11 @@ void h5_loop_run(
 
   while (payload_remain_TP) {
 
+    if (mpi_rank == 0) {
+      cout << "[paralle_hdf5]: Total " << pdimsf[0] << ", \t"
+        << payload_remain_TP << " remain." << endl;
+    }
+
     // set payload_CP, payload_TP, which represent payloads in this epochs.
     int payload_CP;
     int payload_TP;
@@ -358,6 +363,10 @@ void h5_loop_run(
     // update payload_remain_XX
     payload_remain_CP -= payload_CP;
     payload_remain_TP -= payload_TP;
+  }
+
+  if (mpi_rank == 0) {
+    cout << "[paralle_hdf5]: all done! " << endl;
   }
 
   // free para
