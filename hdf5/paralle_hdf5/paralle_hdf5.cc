@@ -3,7 +3,7 @@
 // Author: Chuncheng Wei
 // Mail: weicc1989@gmail.com
 // Created Time : Sun 04 Feb 2018 09:47:16 PM CST
-// Last Modified: Wed Nov 28 02:13:45 2018
+// Last Modified: Wed Nov 28 02:34:10 2018
 //******************************************************************************
 
 #include <iostream>
@@ -366,7 +366,7 @@ void h5_loop_run(
   }
 
   if (mpi_rank == 0) {
-    cout << "[paralle_hdf5]: all done! " << endl;
+    cout << "[paralle_hdf5]: All done!!!" << endl;
   }
 
   // free para
