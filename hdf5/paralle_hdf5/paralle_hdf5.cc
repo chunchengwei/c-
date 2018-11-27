@@ -3,7 +3,7 @@
 // Author: Chuncheng Wei
 // Mail: weicc1989@gmail.com
 // Created Time : Sun 04 Feb 2018 09:47:16 PM CST
-// Last Modified: Tue 27 Mar 2018 10:56:59 AM CST
+// Last Modified: Wed Nov 28 01:17:50 2018
 //******************************************************************************
 
 #include <iostream>
@@ -301,6 +301,7 @@ void h5_loop_run(
    ******************************************************************/
   int payload_remain_CP = pdims[0];   // for current process
   int payload_remain_TP = pdimsf[0];  // for total process
+  int steps = pdimsf[0] / (mpi_size * minibatch);
 
   while (payload_remain_TP) {
 
@@ -308,13 +309,19 @@ void h5_loop_run(
     int payload_CP;
     int payload_TP;
 
-    if (payload_remain_CP < minibatch) {
-      payload_CP        = payload_remain_CP;
-      payload_TP        = pdimsf[0] % (mpi_size * minibatch);
-    } else {
-      payload_CP         = minibatch;
-      payload_TP         = mpi_size * minibatch;
+    if (steps > 0) {
+      payload_CP = minibatch;
+      payload_TP = mpi_size * payload_CP;
     }
+    else if (steps == 0) {
+      payload_CP = payload_remain_TP / mpi_size;
+      payload_TP = mpi_size * payload_CP;
+    }
+    else {
+      payload_CP = (mpi_rank < payload_remain_TP ? 1 : 0);
+      payload_TP = payload_remain_TP;
+    }
+    steps--;
 
     /*********************
      * calculate ext_data
